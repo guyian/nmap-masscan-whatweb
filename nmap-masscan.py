@@ -24,6 +24,8 @@ except ImportError:
 final_domains = []
 # 定义一个引用外部全局对象
 gl = globals()
+# 保存 http_ip 用于 whatweb
+http_ip = []
 
 
 # 线程的一种实现方式 (重写)
@@ -70,10 +72,16 @@ def nmapScan(scan_ip):
         for port in eval('ip' + ''.join(scan_ip.split('.'))):
             # -sS 需要root权限,TCP SYN 的方式来对目标主机进行扫描
             # -Pn #跳过主机发现,进行直接进行更深层次的扫描
-            ret = nm.scan(scan_ip, port, arguments='-Pn,-sS,-sV,-A')
+            # -O 操作系统系别
+            # -sV 服务版本识别
+            ret = nm.scan(scan_ip, port, arguments='-Pn -sS -O')
+            server_name = ""
             service_name = ret['scan'][scan_ip]['tcp'][int(port)]['name']
-            print(' 主机' + scan_ip + '    端口  ' + str(port) + '    服务名为  ' + service_name)
+            if 0 != len(ret['scan'][scan_ip]['osmatch']):
+                server_name = ret['scan'][scan_ip]['osmatch'][0]['osclass'][0]['osfamily']
+            print(' 主机' + scan_ip + '    端口  ' + str(port) + '    系统:服务  ' + server_name + ':' + service_name)
             if 'http' in service_name or service_name == 'sun-answerbook':
+                http_ip.append(scan_ip + ':' + port)
                 if service_name == 'https' or service_name == 'https-alt':
                     scan_url_port = 'https://' + scan_ip + ':' + str(port)
                     webTitle(scan_url_port, service_name)
@@ -81,7 +89,7 @@ def nmapScan(scan_ip):
                     scan_url_port = 'http://' + scan_ip + ':' + str(port)
                     webTitle(scan_url_port, service_name)
             else:
-                final_domains.append(scan_ip + ':' + str(port) + '      ' + service_name)
+                final_domains.append(scan_ip + ':' + str(port) + '-' + server_name + '-' + service_name)
     except Exception as e:
         print(e)
         pass
@@ -91,18 +99,18 @@ def nmapScan(scan_ip):
 def webTitle(scan_url_port, service_name):
     try:
         r = requests.get(scan_url_port, timeout=3, verify=False)
-        # 获取网站的页面编码
-        r_detectencode = chardet.detect(r.content)
-        actual_encode = r_detectencode['encoding']
-        response = re.findall(u'<title>(.*?)</title>', r.content, re.S)
-        if response == []:
-            final_domains.append(scan_url_port + '      ' + service_name)
+        response = ""
+        if '</title>' in r.content:
+            response = r.content[r.content.find('<title>') + 7:r.content.find('</title>')]
+        if response == "":
+            final_domains.append(scan_url_port + '-' + service_name)
         else:
-            # 将页面解码为utf-8，获取中文标题
-            res = response[0].decode(actual_encode).decode('utf-8')
-            banner = r.headers['server']
-            final_domains.append(scan_url_port + '      ' + banner + '      ' + res)
+            banner = ""
+            if 'server' in r.headers.keys():
+                banner = r.headers['server']
+            final_domains.append(scan_url_port + '-' + banner + '-' + response)
     except Exception as e:
+        final_domains.append(scan_url_port + '-' + service_name)
         print(e)
         pass
 
@@ -142,6 +150,10 @@ if __name__ == '__main__':
     for tmp_domain in final_domains:
         if tmp_domain not in tmp_domians:
             ff.write(tmp_domain + '\n')
+    ff.close()
+    ff = open(r'http_ip.txt', 'w')
+    for httpip in http_ip:
+        ff.write(httpip + '\n')
     ff.close()
     spend_time = (datetime.datetime.now() - start_time).seconds
     print('程序共运行了： ' + str(spend_time) + '秒')
